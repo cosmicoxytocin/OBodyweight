@@ -1574,8 +1574,10 @@ RE::Actor* WeightManager::GetNextMorphActor() {
     if (_morphQueue.empty()) return nullptr;
 
     // Distance-aware lazy drain: hand back the CLOSEST loaded actor to the player
-    // first, and defer actors beyond the radius until the player approaches. Stale
-    // (unloaded) actors are dropped — OBody re-queues them when their 3D reloads.
+    // first, and defer actors beyond the radius until the player approaches.
+    // Actors that exist but have no 3D YET are kept (bounded by kMorph3DWaitMs): OBody NG >= 5.2.0
+    // distributes before Character::Load3D and does not re-fire once the 3D is built. Actors that
+    // no longer resolve, or never get a 3D within the window, are dropped.
     auto* player = RE::PlayerCharacter::GetSingleton();
     const bool hasPlayer = player != nullptr;
     const RE::NiPoint3 pPos = hasPlayer ? player->GetPosition() : RE::NiPoint3{};
@@ -1591,9 +1593,26 @@ RE::Actor* WeightManager::GetNextMorphActor() {
 
     for (const RE::FormID id : _morphQueue) {
         auto* actor = RE::TESForm::LookupByID<RE::Actor>(id);
-        if (!actor || !actor->Is3DLoaded()) {
+        if (!actor) {
             _morphReadyAt.erase(id);
-            continue;  // drop stale/unloaded
+            _morph3DWaitSince.erase(id);
+            continue;  // stale form: drop
+        }
+        if (!actor->Is3DLoaded()) {
+            const auto [it, inserted] = _morph3DWaitSince.try_emplace(id, now);
+            if (now - it->second > kMorph3DWaitMs) {
+                if (_debugLog) SKSE::log::info("queue: {:08X} never got a 3D within {:.0f}ms; dropped", id, kMorph3DWaitMs);
+                _morphReadyAt.erase(id);
+                _morph3DWaitSince.erase(id);
+                continue;  // waited too long: drop (a later 3D load re-queues via the load sink / OBody)
+            }
+            alive.push_back(id);   // keep: 3D is still being built
+            continue;
+        }
+        if (const auto waited = _morph3DWaitSince.find(id); waited != _morph3DWaitSince.end()) {
+            // 3D just appeared for an actor we were waiting on: give RaceMenu a moment to finish morphing.
+            _morph3DWaitSince.erase(waited);
+            _morphReadyAt[id] = (std::max)(_morphReadyAt.count(id) ? _morphReadyAt[id] : 0.0, now + kPost3DSettleMs);
         }
         alive.push_back(id);
         const auto ready = _morphReadyAt.find(id);
@@ -1607,10 +1626,11 @@ RE::Actor* WeightManager::GetNextMorphActor() {
     }
     _morphQueue.swap(alive);
 
-    if (!best) return nullptr;  // none within radius → keep them queued, process later
+    if (!best) return nullptr;  // none within radius / none settled yet -> keep them queued, process later
     auto it = std::find(_morphQueue.begin(), _morphQueue.end(), bestId);
     if (it != _morphQueue.end()) _morphQueue.erase(it);
     _morphReadyAt.erase(bestId);
+    _morph3DWaitSince.erase(bestId);
     // Random mode = an INDEPENDENT random seed per character, assigned ONCE on first processing and persisted
     // (_overrideSeed is serialized) -> stable across save/load within a playthrough, different on each NEW GAME,
     // and NOT reproducible from a single shareable seed. (Seeded keeps id^_seed, which IS shareable.) Also seed the
