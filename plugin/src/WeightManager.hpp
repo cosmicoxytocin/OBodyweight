@@ -393,6 +393,7 @@ private:
     std::unordered_map<RE::FormID, double>        _recentApply;     // formID -> steady-clock ms of OUR last apply (re-fire window)
     std::vector<RE::FormID>                       _morphQueue;
     std::unordered_map<RE::FormID, double>        _morphReadyAt;    // formID -> quiet-period deadline before SKEE rebuild
+    std::unordered_map<RE::FormID, double>        _morph3DWaitSince; // formID -> steady-clock ms when first seen queued WITHOUT loaded 3D
     std::unordered_map<RE::FormID, std::uint32_t> _overrideSeed;
     std::unordered_map<RE::FormID, int>           _fallbackWatch;   // id -> grace ticks before self-distributing
     std::unordered_map<RE::FormID, std::string>   _presetName;      // id -> OBody preset the actor's body came from
@@ -401,6 +402,11 @@ private:
 
     static constexpr int kFallbackGraceTicks = 2;   // SweepFallback ticks (~2s each) to wait for OBody first
     static constexpr double kMorphSettleMs = 5000.0; // reset per enqueue; lets OBody/SKEE async work finish
+    // OBody NG >= 5.2.0 distributes BEFORE Character::Load3D, so its events can arrive while the actor has no 3D yet.
+    // Keep such actors queued for up to this long instead of dropping them (OBody will NOT re-fire when 3D appears).
+    static constexpr double kMorph3DWaitMs   = 30000.0;
+    // Extra settle time after a waiting actor's 3D appears (RaceMenu is still morphing the armor addons as they attach).
+    static constexpr double kPost3DSettleMs  = 1500.0;
 
 public:
     static constexpr std::uint32_t kRecordUID  = 'OBWS';
