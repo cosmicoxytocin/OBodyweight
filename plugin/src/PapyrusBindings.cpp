@@ -79,6 +79,23 @@ public:
     }
 };
 
+// A/B SWITCH for the OBody-ORefit takeover.
+//   false: clear OBody's "OClothe" (refit) morphs once, at takeover. Minimal; OBody's own equip handler can
+//          re-add its additive default refit on the next armor change.
+//   true : ALSO mark the actor "obody_blacklisted" under OBody's key (exactly what OBody itself does for its
+//          blacklisted NPCs). OBody then skips ORefit for this actor on equip events (ProcessActorEquipEvent
+//          and UpdateClothePreset both bail on IsBlacklisted), so OBW's own ClothedRefit is the only refit.
+//          A manual preset assignment through OBody's menu clears the marker (GenerateBodyByPreset clears the
+//          whole "OBody" key), so OBody's on-demand features still work.
+constexpr bool kMarkManagedAsBlacklisted = false;
+
+void SuppressObodyRefit(RE::Actor* a_actor) {
+    if (!a_actor || !OBW::g_morph) return;
+    OBW::g_morph->ClearBodyMorphKeys(a_actor, "OClothe");
+    if constexpr (kMarkManagedAsBlacklisted)
+        OBW::g_morph->SetMorph(a_actor, "obody_blacklisted", "OBody", 1.0f);
+}
+
 // Generate and return the weight for the actor (without applying it).
 float GetWeight(RE::StaticFunctionTag*, RE::Actor* a_actor) {
     return WeightManager::GetSingleton().GenerateWeight(a_actor);
