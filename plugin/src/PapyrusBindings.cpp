@@ -184,6 +184,7 @@ bool ApplyPresetMorphs(RE::StaticFunctionTag*, RE::BSFixedString a_preset, RE::A
             OBW::g_morph->SetMorph(a, obKey.c_str(), "OBody", 1.0f);   // re-assert "processed"
             for (const auto& [name, val] : keep.out)                    // restore the intimates OBody rolled
                 OBW::g_morph->SetMorph(a, name.c_str(), "OBody", val);
+            SuppressOBodyRefit(a);                                     // OBody's ORefit ("OClothe") must not stack on OBW's body
             OBW::g_morph->ApplyBodyMorphs(a, false);                   // rebuild body + worn armor
             auto& wm = WeightManager::GetSingleton();
             wm.ApplyNeckColor(a);                                       // pull the head tint to the body tone (neck-seam color)
@@ -339,6 +340,7 @@ bool ApplyAllMorphs(RE::StaticFunctionTag*, RE::Actor* a_actor, bool a_isFemale,
             OBW::g_morph->SetMorph(a, obKey.c_str(), "OBody", wasProcessed);   // re-assert "processed"
             for (const auto& [name, val] : keep.out)                    // restore the intimates OBody rolled
                 OBW::g_morph->SetMorph(a, name.c_str(), "OBody", val);
+            SuppressOBodyRefit(a);                                      // OBody's ORefit ("OClothe") must not stack on OBW's body
             auto& wmt = WeightManager::GetSingleton();
             wmt.ApplyClothedRefit(a, wmt.IsBodyArmorWorn(a), true, false);     // trim delta only; rebuild below
             wmt.StampApply(id);                                        // open the re-fire suppression window
