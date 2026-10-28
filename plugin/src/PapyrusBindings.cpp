@@ -11,6 +11,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>     // preset export
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +48,50 @@ std::string ToLowerStr(std::string_view s) {
     std::transform(out.begin(), out.end(), out.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return out;
+}
+
+// UBE detection, mirroring OBody NG 5.2.1's OBody::IsUBE (src/Body/Body.cpp): the body is the first armor
+// addon of the actor's skin (its own, else its race's) that covers the body slot and fits the race; it is UBE
+// when that mesh lives under meshes\!UBE. OBW's slider tables / BodyNet models are CBBE-3BA, BHUNP and HIMBO
+// only, so procedural generation must leave UBE actors to OBody.
+bool IsUBEMeshPath(const char* a_model) {
+    if (!a_model) return false;
+    std::string p = ToLowerStr(a_model);
+    return p.find("!ube\\") != std::string::npos || p.find("!ube/") != std::string::npos;
+}
+
+bool IsUBEBody(RE::StaticFunctionTag*, RE::Actor* a_actor) {
+    if (!a_actor) return false;
+    const auto* base = a_actor->GetActorBase();
+    auto* race = a_actor->GetRace();
+    if (!base || !race) return false;
+    const auto* skin = base->skin ? base->skin : race->skin;
+    if (!skin) return false;
+
+    const auto sex = base->GetSex() == RE::SEX::kFemale ? RE::SEXES::kFemale : RE::SEXES::kMale;
+    const std::uint64_t key = (static_cast<std::uint64_t>(skin->GetFormID()) << 32) | race->GetFormID();
+
+    static std::mutex s_mutex;
+    static std::unordered_map<std::uint64_t, bool> s_cache[RE::SEXES::kTotal];
+    {
+        std::scoped_lock lock(s_mutex);
+        if (const auto it = s_cache[sex].find(key); it != s_cache[sex].end()) return it->second;
+    }
+
+    bool ube = false;
+    for (const auto* addon : skin->armorAddons) {
+        if (addon && addon->HasPartOf(RE::BGSBipedObjectForm::BipedObjectSlot::kBody) && addon->IsValidRace(race)) {
+            ube = IsUBEMeshPath(addon->bipedModels[sex].GetModel());
+            break;
+        }
+    }
+    {
+        std::scoped_lock lock(s_mutex);
+        s_cache[sex].emplace(key, ube);
+    }
+    if (ube) SKSE::log::info("UBE body detected (skin {:08X}, race {}): OBW procedural modes leave it to OBody",
+                             skin->GetFormID(), race->GetFormEditorID());
+    return ube;
 }
 
 // OBody NG procedurally varies the nipple/genital sliders per NPC and writes them under its "OBody" morph
@@ -1117,6 +1162,7 @@ bool Register(RE::BSScript::IVirtualMachine* a_vm) {
     a_vm->RegisterFunction("GetVRLookTarget",     kScript, GetVRLookTarget);
     a_vm->RegisterFunction("MarkMorphsApplied",   kScript, MarkMorphsApplied);
     a_vm->RegisterFunction("HasMorphsApplied",    kScript, HasMorphsApplied);
+    a_vm->RegisterFunction("IsUBEBody",           kScript, IsUBEBody);
     SKSE::log::info("OBW: Papyrus bindings registered");
     return true;
 }
